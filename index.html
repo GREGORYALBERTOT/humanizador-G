@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title id="tituloApp">Humanizador G</title>
+    <link rel="stylesheet" href="estilos.css" />
+</head>
+<body>
+    <div class="background-animated"></div>
+
+    <div class="header-container">
+        <div class="logo-container">
+            <img src="logo.png" alt="Logo" class="logo" />
+        </div>
+        <button class="button-login" id="botonLogin">Iniciar Sesión</button>
+    </div>
+
+    <h1 class="titulo-gradient" id="tituloPrincipal">Humanizador G</h1>
+
+    <div class="textarea-container">
+        <textarea id="textoOriginal" rows="6" placeholder="Pega tu texto aquí..." required></textarea>
+    </div>
+    <br />
+
+    <div class="selector-tono">
+        <label for="estiloTono" id="labelTono">Tono del texto:</label>
+        <div class="select-wrapper">
+            <select id="estiloTono">
+                <option value="neutral" id="opcionNeutral" selected>Neutral</option>
+                <option value="formal" id="opcionFormal">Formal</option>
+                <option value="conversacional" id="opcionConversacional">Conversacional</option>
+            </select>
+            <span class="custom-arrow"></span>
+        </div>
+    </div>
+    <br />
+
+    <div class="buttons-container">
+        <button class="button" id="botonHumanizar">Humanizar Texto</button>
+        <button class="button" id="botonCopiar">Copiar Texto</button>
+        <button class="button" id="botonDescargar">Descargar TXT</button>
+    </div>
+
+    <div class="language-selector">
+        <label for="selectorIdioma">Idioma:</label>
+        <select id="selectorIdioma">
+            <option value="es">Español</option>
+            <option value="en">English</option>
+        </select>
+    </div>
+
+    <div id="resultado" class="resultado-card" style="display: none;">
+        <p class="heading" id="tituloResultado">Texto Humanizado</p>
+        <p id="textoHumanizado" class="texto-humanizado"></p>
+    </div>
+
+    <div id="estadisticas" class="estadisticas">
+        <p id="originalStats">Palabras originales: 0</p>
+        <p id="humanizedStats">Palabras humanizadas: 0</p>
+        <p id="planActual"></p> <p id="contadorIntentos"></p> <p id="limitePalabras"></p> <p id="mejorarPlanPrompt">
+            <a href="#" id="mejorarPlanLink"></a> </p>
+    </div>
+
+    <button class="button button-toggle-dark" id="botonModoOscuro">Alternar Modo Oscuro</button>
+
+    <div id="loginModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" id="cerrarModal">&times;</span>
+            <h2 id="modalTitulo">Iniciar Sesión</h2>
+            <form id="authForm">
+                <label for="username" id="labelUsername">Usuario:</label>
+                <input type="text" id="username" name="username" required autocomplete="username">
+                <label for="password" id="labelPassword">Contraseña:</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
+                <button type="submit" id="submitAuth">Entrar</button>
+                <p id="toggleAuthMode">
+                    <a href="#" id="linkRegistro">¿No tienes cuenta? Regístrate aquí.</a>
+                </p>
+                <div id="modalMessage" class="modal-message" style="display: none;"></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="upgradePlanModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" id="closeModalUpgrade">&times;</span>
+            <h2 id="upgradeModalTitle">Mejora tu Plan</h2>
+            <p id="upgradePlanMessage">Has alcanzado los límites de tu plan actual. Mejora tu plan para humanizar más texto sin restricciones.</p>
+            <div class="plan-options">
+                <label>
+                    <input type="radio" name="plan" value="standard" id="upgradePlanOptionStandard">
+                    Estándar (30 intentos / 400 palabras)
+                </label>
+                <label>
+                    <input type="radio" name="plan" value="premium" id="upgradePlanOptionPremium">
+                    Premium (Ilimitado)
+                </label>
+            </div>
+            <button id="upgradePlanButton" class="button">Mejorar Ahora</button>
+            <div id="upgradeModalResponse" class="modal-message" style="display: none;"></div>
+        </div>
+    </div>
+
+
+    <script src="humanizador.js"></script>
+</body>
+</html>
