@@ -3,67 +3,81 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title id="tituloApp">Humanizador G</title>
+    <title id="tituloApp">Humanizador Boon</title>
     <link rel="stylesheet" href="estilos.css" />
 </head>
 <body>
-    <div class="background-animated"></div>
+    <!-- HEADER + SIDEBAR -->
+    <header class="header">
+        <button class="menu-toggle" id="menuToggle" aria-label="Abrir menú">&#9776;</button>
+        <nav class="header-nav">
+            <button class="button-plan" id="botonPlanes">Planes</button>
+            <button class="button-login" id="botonLogin">Iniciar Sesión</button>
+        </nav>
+    </header>
+    <aside class="sidebar" id="sidebar">
+        <nav class="sidebar-nav">
+            <a href="#" class="sidebar-link activo">Humanizador de IA</a>
+            <a href="#" class="sidebar-link">Detector de IA</a>
+        </nav>
+    </aside>
 
-    <div class="header-container">
-        <div class="logo-container">
-            <img src="logo.png" alt="Logo" class="logo" />
-        </div>
-        <button class="button-login" id="botonLogin">Iniciar Sesión</button>
-    </div>
+    <!-- MAIN -->
+    <main class="main-content">
+        <section class="center-panel">
+            <div class="logo-container">
+                <img src="logo.png" alt="Logo" class="main-logo" />
+            </div>
+            <h1 class="titulo-gradient" id="tituloPrincipal">Humanizador Boon</h1>
+            <p class="main-desc">
+                Bienvenido a nuestro Humanizador&nbsp;de textos de IA, tu herramienta gratuita para transformar contenido generado por máquinas en lenguaje auténtico, fluido y humano. Con solo pegar tu texto, nuestra tecnología lo adapta en segundos, haciendo que cada palabra suene natural y conecte realmente con las personas.
+            </p>
+            <div class="textarea-container">
+                <textarea id="textoOriginal" rows="6" placeholder="Pega tu texto aquí..." required></textarea>
+            </div>
+            <div class="botonera">
+                <button class="button" id="botonHumanizar">Humanizar</button>
+                <button class="button" id="botonCopiar">Copiar</button>
+                <button class="button" id="botonDescargar">Descargar TXT</button>
+            </div>
+            <div id="resultado" class="resultado-card" style="display: none;">
+                <p class="heading" id="tituloResultado">Texto Humanizado</p>
+                <p id="textoHumanizado" class="texto-humanizado"></p>
+            </div>
+            <div id="estadisticas" class="estadisticas">
+                <p id="originalStats">Palabras originales: 0</p>
+                <p id="humanizedStats">Palabras humanizadas: 0</p>
+                <p id="contadorIntentos"></p>
+            </div>
+            <button class="button button-toggle-dark" id="botonModoOscuro">Alternar Modo Oscuro</button>
+        </section>
+        <section class="side-panel">
+            <div class="selector-tono">
+                <label for="estiloTono" id="labelTono">Tono del texto:</label>
+                <div class="select-wrapper">
+                    <select id="estiloTono">
+                        <option value="neutral" id="opcionNeutral" selected>Neutral</option>
+                        <option value="formal" id="opcionFormal">Formal</option>
+                        <option value="conversacional" id="opcionConversacional">Conversacional</option>
+                    </select>
+                </div>
+            </div>
+            <div class="selector-idioma">
+                <label for="selectorIdioma" id="labelIdioma">Idioma:</label>
+                <div class="select-wrapper">
+                    <select id="selectorIdioma">
+                        <option value="es">Español</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+    </main>
 
-    <h1 class="titulo-gradient" id="tituloPrincipal">Humanizador G</h1>
+    <!-- Contenedor de notificaciones dinámico (lo crea JS si no existe, pero mejor dejarlo aquí) -->
+    <div id="notificacionContainer"></div>
 
-    <div class="textarea-container">
-        <textarea id="textoOriginal" rows="6" placeholder="Pega tu texto aquí..." required></textarea>
-    </div>
-    <br />
-
-    <div class="selector-tono">
-        <label for="estiloTono" id="labelTono">Tono del texto:</label>
-        <div class="select-wrapper">
-            <select id="estiloTono">
-                <option value="neutral" id="opcionNeutral" selected>Neutral</option>
-                <option value="formal" id="opcionFormal">Formal</option>
-                <option value="conversacional" id="opcionConversacional">Conversacional</option>
-            </select>
-            <span class="custom-arrow"></span>
-        </div>
-    </div>
-    <br />
-
-    <div class="buttons-container">
-        <button class="button" id="botonHumanizar">Humanizar Texto</button>
-        <button class="button" id="botonCopiar">Copiar Texto</button>
-        <button class="button" id="botonDescargar">Descargar TXT</button>
-    </div>
-
-    <div class="language-selector">
-        <label for="selectorIdioma">Idioma:</label>
-        <select id="selectorIdioma">
-            <option value="es">Español</option>
-            <option value="en">English</option>
-        </select>
-    </div>
-
-    <div id="resultado" class="resultado-card" style="display: none;">
-        <p class="heading" id="tituloResultado">Texto Humanizado</p>
-        <p id="textoHumanizado" class="texto-humanizado"></p>
-    </div>
-
-    <div id="estadisticas" class="estadisticas">
-        <p id="originalStats">Palabras originales: 0</p>
-        <p id="humanizedStats">Palabras humanizadas: 0</p>
-        <p id="planActual"></p> <p id="contadorIntentos"></p> <p id="limitePalabras"></p> <p id="mejorarPlanPrompt">
-            <a href="#" id="mejorarPlanLink"></a> </p>
-    </div>
-
-    <button class="button button-toggle-dark" id="botonModoOscuro">Alternar Modo Oscuro</button>
-
+    <!-- Modal Login/Registro -->
     <div id="loginModal" class="modal">
         <div class="modal-content">
             <span class="close-button" id="cerrarModal">&times;</span>
@@ -77,31 +91,81 @@
                 <p id="toggleAuthMode">
                     <a href="#" id="linkRegistro">¿No tienes cuenta? Regístrate aquí.</a>
                 </p>
-                <div id="modalMessage" class="modal-message" style="display: none;"></div>
             </form>
-        </div>
-    </div>
-
-    <div id="upgradePlanModal" class="modal">
-        <div class="modal-content">
-            <span class="close-button" id="closeModalUpgrade">&times;</span>
-            <h2 id="upgradeModalTitle">Mejora tu Plan</h2>
-            <p id="upgradePlanMessage">Has alcanzado los límites de tu plan actual. Mejora tu plan para humanizar más texto sin restricciones.</p>
-            <div class="plan-options">
-                <label>
-                    <input type="radio" name="plan" value="standard" id="upgradePlanOptionStandard">
-                    Estándar (30 intentos / 400 palabras)
-                </label>
-                <label>
-                    <input type="radio" name="plan" value="premium" id="upgradePlanOptionPremium">
-                    Premium (Ilimitado)
-                </label>
+            <!-- Interfaz de planes para la opción de registro -->
+            <div id="planesEnRegistro" class="planes-modal-content" style="display:none;">
+                <h2>Elige tu Plan</h2>
+                <div class="planes-lista">
+                    <div class="plan plan-basico">
+                        <h3>Plan Básico</h3>
+                        <p class="plan-precio">0 S/</p>
+                        <ul>
+                            <li>Límite de 5 intentos diarios</li>
+                            <li>Hasta 300 palabras por intento</li>
+                            <li>Activo por defecto</li>
+                        </ul>
+                    </div>
+                    <div class="plan plan-estandar">
+                        <h3>Plan Estándar</h3>
+                        <p class="plan-precio">15 S/</p>
+                        <ul>
+                            <li>30 intentos a la semana</li>
+                            <li>Se recarga cada lunes</li>
+                            <li>Hasta 1000 palabras por intento</li>
+                        </ul>
+                        <button class="button button-plan-comprar" disabled>Próximamente</button>
+                    </div>
+                    <div class="plan plan-ilimitado">
+                        <h3>Plan Ilimitado</h3>
+                        <p class="plan-precio">20 S/</p>
+                        <ul>
+                            <li>Intentos y palabras ilimitadas</li>
+                            <li>Acceso a mejor versión del humanizador</li>
+                        </ul>
+                        <button class="button button-plan-comprar" disabled>Próximamente</button>
+                    </div>
+                </div>
             </div>
-            <button id="upgradePlanButton" class="button">Mejorar Ahora</button>
-            <div id="upgradeModalResponse" class="modal-message" style="display: none;"></div>
         </div>
     </div>
 
+    <!-- Modal Planes -->
+    <div id="planesModal" class="modal">
+        <div class="modal-content planes-modal-content">
+            <span class="close-button" id="cerrarPlanesModal">&times;</span>
+            <h2>Elige tu Plan</h2>
+            <div class="planes-lista">
+                <div class="plan plan-basico">
+                    <h3>Plan Básico</h3>
+                    <p class="plan-precio">0 S/</p>
+                    <ul>
+                        <li>Límite de 5 intentos diarios</li>
+                        <li>Hasta 300 palabras por intento</li>
+                        <li>Activo por defecto</li>
+                    </ul>
+                </div>
+                <div class="plan plan-estandar">
+                    <h3>Plan Estándar</h3>
+                    <p class="plan-precio">15 S/</p>
+                    <ul>
+                        <li>30 intentos a la semana</li>
+                        <li>Se recarga cada lunes</li>
+                        <li>Hasta 1000 palabras por intento</li>
+                    </ul>
+                    <button class="button button-plan-comprar" disabled>Próximamente</button>
+                </div>
+                <div class="plan plan-ilimitado">
+                    <h3>Plan Ilimitado</h3>
+                    <p class="plan-precio">20 S/</p>
+                    <ul>
+                        <li>Intentos y palabras ilimitadas</li>
+                        <li>Acceso a mejor versión del humanizador</li>
+                    </ul>
+                    <button class="button button-plan-comprar" disabled>Próximamente</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="humanizador.js"></script>
 </body>
