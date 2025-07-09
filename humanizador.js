@@ -1,1035 +1,784 @@
-// humanizador.js (Versión completa corregida y con depuración para el modal)
-
-// === UTILIDADES BÁSICAS ===
-const obtenerElemento = id => document.querySelector(`#${id}`);
-
-const obtenerFraseAleatoria = (frases, usadas) => {
-    if (!frases || frases.length === 0) return "";
-    if (usadas.size === frases.length) {
-        usadas.clear();
-    }
-    const disponibles = frases.filter(f => !usadas.has(f));
-    const seleccion = disponibles.length > 0 ? disponibles[Math.floor(Math.random() * disponibles.length)] : frases[Math.floor(Math.random() * frases.length)];
-    usadas.add(seleccion);
-    return seleccion;
-};
-
-const mezclarPalabras = oracion => {
-    const palabras = oracion.split(" ");
-    if (palabras.length < 6) return oracion;
-    const indice = Math.floor(Math.random() * (palabras.length - 3)) + 1;
-    const parte1 = palabras.slice(0, indice).join(" ");
-    const parte2 = palabras.slice(indice).join(" ");
-    return `${parte2}, ${parte1}`;
-};
-
-const parafrasearLigeramente = (oracion, reemplazos) => {
-    let resultado = oracion;
-    if (!reemplazos) return oracion;
-    reemplazos.forEach(({ original, nuevo }) => {
-        const regex = new RegExp(`\\b${original}\\b`, "gi");
-        resultado = resultado.replace(regex, nuevo);
-    });
-    return resultado;
-};
-
-// Función para contar palabras
-const contarPalabras = (texto) => {
-    if (!texto) return 0;
-    const palabras = texto.trim().split(/\s+/);
-    return palabras.filter(word => word.length > 0).length;
-};
-
-
-// === NUEVAS FUNCIONES PARA TONOS ===
-const generarTonoConversacional = (oracion, adiciones, exclamacionChar) => {
-    let resultado = oracion;
-    if (adiciones && adiciones.length > 0) {
-        const randomAdition = adiciones[Math.floor(Math.random() * adiciones.length)];
-        if (Math.random() < 0.3) {
-            resultado += randomAdition;
-        }
-    }
-
-    if (Math.random() < 0.3) {
-        if (!resultado.endsWith(exclamacionChar) && !resultado.endsWith('!') && !resultado.endsWith('?')) {
-            resultado += exclamacionChar;
-        }
-    } else if (Math.random() < 0.3 && resultado.split(" ").length > 3) {
-        const palabras = resultado.split(" ");
-        const indice = Math.floor(Math.random() * (palabras.length - 1));
-        palabras[indice] = palabras[indice].toLowerCase();
-        resultado = palabras.join(" ");
-    }
-    return resultado;
-};
-
-const generarTonoFormal = (oracion, reemplazosFormales) => {
-    let resultado = oracion;
-    if (!reemplazosFormales) return oracion;
-    reemplazosFormales.forEach(({ original, nuevo }) => {
-        const regex = new RegExp(`\\b${original}\\b`, "gi");
-        resultado = resultado.replace(regex, nuevo);
-    });
-    return resultado;
-};
-
-// --- GESTIÓN DE LÍMITE DE INTENTOS Y PALABRAS ---
-const PLAN_LIMITS_CLIENT = {
-    free: { attempts: 3, word_limit: 200, name: 'Básico (Gratis)' },
-    standard: { attempts: 30, word_limit: 400, name: 'Estándar' },
-    premium: { attempts: Infinity, word_limit: Infinity, name: 'Premium' }
-};
-
-let usuarioLogueado = null;
-let jwtToken = null;
-let userPlanInfo = null; // Almacenará plan_type, daily_attempts, word_count_today, etc.
-
-const actualizarContadorIntentosUI = () => {
-    const textos = contenidoIdioma[idiomaActual];
-    const contadorElement = obtenerElemento('contadorIntentos');
-    const limitePalabrasElement = obtenerElemento('limitePalabras'); // Asegúrate que este elemento exista en tu HTML
-    const planActualElement = obtenerElemento('planActual'); // Asegúrate que este elemento exista en tu HTML
-
-    if (contadorElement) {
-        if (usuarioLogueado && userPlanInfo) {
-            const plan = PLAN_LIMITS_CLIENT[userPlanInfo.plan_type];
-            if (plan.attempts === Infinity) {
-                contadorElement.innerText = textos.intentosIlimitados;
-            } else {
-                const intentosRestantes = plan.attempts - userPlanInfo.daily_attempts;
-                contadorElement.innerText = `${textos.intentosRestantes}: ${intentosRestantes}`;
-            }
-
-            if (plan.word_limit === Infinity) {
-                if (limitePalabrasElement) limitePalabrasElement.innerText = textos.palabrasIlimitadas;
-            } else {
-                const palabrasRestantes = plan.word_limit - userPlanInfo.word_count_today;
-                if (limitePalabrasElement) limitePalabrasElement.innerText = `${textos.palabrasRestantes}: ${palabrasRestantes}`;
-            }
-            if (planActualElement) planActualElement.innerText = `${textos.tuPlanActual}: ${plan.name}`;
-        } else {
-            // Usuario no logueado, usar límites del plan free como referencia
-            const planFree = PLAN_LIMITS_CLIENT.free;
-            contadorElement.innerText = `${textos.intentosRestantes}: ${planFree.attempts}`;
-            if (limitePalabrasElement) limitePalabrasElement.innerText = `${textos.palabrasRestantes}: ${planFree.word_limit}`;
-            if (planActualElement) planActualElement.innerText = `${textos.tuPlanActual}: ${planFree.name}`;
-        }
+// === UTILIDAD: Logger interno (opcional) ===
+const logger = (mensaje, nivel = 'info') => {
+    if (localStorage.getItem('modoDebug') === 'true') {
+        console[nivel](mensaje);
     }
 };
 
-// --- FIN GESTIÓN DE LÍMITE DE INTENTOS Y PALABRAS ---
+// === UTILIDAD: Reemplazo de sinónimos ===
+const Sinonimos = (() => {
+    const sinonimos = {
+        "importante": ["crucial", "relevante", "significativo"],
+        "personas": ["individuos", "seres humanos", "ciudadanos"],
+        "problema": ["inconveniente", "obstáculo", "dificultad"],
+        "decisión": ["resolución", "determinación", "elección"],
+        "acción": ["medida", "intervención", "comportamiento"]
+    };
 
-
-// --- GESTIÓN DE CUENTAS (LOGIN/REGISTRO) ---
-const API_BASE_URL = 'http://192.168.1.88:3000/api'; // Asegúrate de que esta URL sea correcta para tu backend
-
-// Referencias a elementos del DOM para el modal (se obtienen en DOMContentLoaded)
-let loginModal;
-let cerrarModalButton; // Nueva referencia para el botón de cerrar
-let modalTitulo;
-let authForm;
-let labelUsername;
-let usernameInput;
-let labelPassword;
-let passwordInput;
-let submitAuthButton;
-let linkRegistro;
-let modalMessage;
-let upgradePlanModal;
-let closeModalUpgradeBtn;
-let upgradePlanOptions;
-let upgradePlanMessage;
-let upgradePlanButton;
-
-let esModoRegistro = false;
-let needsUpgradeAfterAction = false; // Bandera para indicar si el modal de mejora debe aparecer
-
-const abrirModal = () => {
-    if (loginModal) {
-        loginModal.style.display = 'flex';
-        loginModal.classList.add('fade-in');
-        console.log('Modal abierto.'); // Debugging: Confirmar que el modal se abre
-    }
-    if (usernameInput) usernameInput.value = '';
-    if (passwordInput) passwordInput.value = '';
-
-    esModoRegistro = false;
-    actualizarModalUI();
-    mostrarMensajeModal('', false, 'modalMessage'); // Usa el id del modal
-};
-
-const cerrarModal = () => {
-    if (loginModal) {
-        loginModal.classList.remove('fade-in');
-        loginModal.style.display = 'none';
-        console.log('Modal cerrado.'); // Debugging: Confirmar que el modal se cierra
-    }
-    mostrarMensajeModal('', false, 'modalMessage'); // Usa el id del modal
-};
-
-const abrirModalMejorarPlan = (message, reasonCode) => {
-    const textos = contenidoIdioma[idiomaActual];
-    if (upgradePlanModal) {
-        upgradePlanModal.style.display = 'flex';
-        upgradePlanModal.classList.add('fade-in');
-        if (upgradePlanMessage) {
-            upgradePlanMessage.innerHTML = `${message}<br><br>${textos.razonLimite}`; // Puedes personalizar el mensaje
-        }
-    }
-};
-
-const cerrarModalMejorarPlan = () => {
-    if (upgradePlanModal) {
-        upgradePlanModal.classList.remove('fade-in');
-        upgradePlanModal.style.display = 'none';
-    }
-};
-
-const actualizarBotonLoginUI = () => {
-    const boton = obtenerElemento('botonLogin');
-    if (!boton) return;
-
-    const textos = contenidoIdioma[idiomaActual];
-    if (usuarioLogueado && usuarioLogueado.email) {
-        boton.innerText = `${textos.cerrarSesion} (${usuarioLogueado.email.split('@')[0]})`;
-        boton.onclick = cerrarSesion;
-    } else {
-        boton.innerText = textos.iniciarSesion;
-        boton.onclick = abrirModal;
-    }
-    actualizarContadorIntentosUI();
-};
-
-const actualizarModalUI = () => {
-    const textos = contenidoIdioma[idiomaActual];
-
-    if (modalTitulo) modalTitulo.innerText = esModoRegistro ? textos.registrarCuenta : textos.iniciarSesion;
-    if (labelUsername) labelUsername.innerText = esModoRegistro ? textos.labelEmailRegistro : textos.labelEmailLogin;
-    if (submitAuthButton) submitAuthButton.innerText = esModoRegistro ? textos.registrar : textos.entrar;
-    if (linkRegistro) linkRegistro.innerText = esModoRegistro ? textos.tienesCuenta : textos.noTienesCuenta;
-    if (labelPassword) labelPassword.innerText = textos.labelPassword;
-
-    if (usernameInput) {
-        usernameInput.type = 'email';
-        usernameInput.autocomplete = esModoRegistro ? 'email' : 'username';
-        usernameInput.placeholder = esModoRegistro ? textos.placeholderEmailRegistro : textos.placeholderEmailLogin;
-    }
-};
-
-const alternarModoAuth = (event) => {
-    event.preventDefault();
-    esModoRegistro = !esModoRegistro;
-    actualizarModalUI();
-    mostrarMensajeModal('', false, 'modalMessage'); // Usa el id del modal
-};
-
-const mostrarMensajeModal = (message, isError, elementId = 'modalMessage') => {
-    const targetElement = obtenerElemento(elementId);
-    if (targetElement) {
-        targetElement.textContent = message;
-        targetElement.style.color = isError ? 'red' : 'green';
-        targetElement.style.display = message ? 'block' : 'none';
-    }
-};
-
-const manejarAutenticacion = async (event) => {
-    event.preventDefault();
-
-    if (!usernameInput || !passwordInput) {
-        console.error("Inputs de email o contraseña no encontrados.");
-        return;
-    }
-
-    const email = usernameInput.value.trim();
-    const password = passwordInput.value.trim();
-    const textos = contenidoIdioma[idiomaActual];
-
-    if (!email || !password) {
-        mostrarMensajeModal(textos.alertaCamposVacios, true, 'modalMessage');
-        return;
-    }
-
-    try {
-        let endpoint = esModoRegistro ? `${API_BASE_URL}/register` : `${API_BASE_URL}/login`;
-
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ email, password })
+    const reemplazar = texto => {
+        Object.entries(sinonimos).forEach(([palabra, opciones]) => {
+            const regex = new RegExp(`\b${palabra}\b`, 'gi');
+            const opcion = opciones[Math.floor(Math.random() * opciones.length)];
+            texto = texto.replace(regex, opcion);
         });
+        return texto;
+    };
 
-        const data = await response.json();
+    return { reemplazar };
+})();
 
-        if (!response.ok) {
-            mostrarMensajeModal(data.message || `${textos.errorOperacion} ${response.status}`, true, 'modalMessage');
-            return;
-        }
-
-        jwtToken = data.token;
-        localStorage.setItem('jwt_token', jwtToken);
-
-        usuarioLogueado = data.user;
-        localStorage.setItem('usuarioActualEmail', usuarioLogueado.email);
-        localStorage.setItem('user_data', JSON.stringify(data.user)); // Guardar todos los datos del usuario
-
-        // Actualizar la información del plan del usuario al loguearse/registrarse
-        userPlanInfo = {
-            plan_type: usuarioLogueado.plan_type,
-            daily_attempts: usuarioLogueado.daily_attempts,
-            word_count_today: usuarioLogueado.word_count_today
-        };
-
-        mostrarMensajeModal(`${textos.bienvenido} ${usuarioLogueado.email}!`, false, 'modalMessage');
-
-        setTimeout(() => {
-            cerrarModal();
-            actualizarBotonLoginUI();
-            actualizarContadorIntentosUI(); // Actualizar inmediatamente después del login
-            if (needsUpgradeAfterAction && userPlanInfo.plan_type === 'free') {
-                abrirModalMejorarPlan(textos.alertaLimiteIntentos, '');
-                needsUpgradeAfterAction = false; // Resetear la bandera
-            }
-        }, 1500);
-
-
-    } catch (error) {
-        console.error('Error de autenticación:', error);
-        mostrarMensajeModal(textos.errorConexion || 'Error de conexión con el servidor de autenticación.', true, 'modalMessage');
-    }
+// === FUNCIONALIDAD: Detección de idioma básico ===
+const detectarIdioma = texto => {
+    const es = /\b(el|la|los|las|un|una|por|para|con)\b/i.test(texto);
+    const en = /\b(the|and|or|with|for|is|this|that)\b/i.test(texto);
+    if (es && !en) return 'es';
+    if (en && !es) return 'en';
+    return 'es'; // default
 };
 
-const cerrarSesion = () => {
-    const textos = contenidoIdioma[idiomaActual];
-    if (confirm(textos.confirmarCerrarSesion)) {
-        usuarioLogueado = null;
-        jwtToken = null;
-        userPlanInfo = null; // Limpiar info del plan
-        localStorage.removeItem('jwt_token');
-        localStorage.removeItem('usuarioActualEmail');
-        localStorage.removeItem('user_data'); // Eliminar también los datos del usuario
-        alert(textos.sesionCerrada);
-        actualizarBotonLoginUI();
-        actualizarContadorIntentosUI(); // Resetear UI a valores de no logueado
-    }
-};
+// === MEJORA: Revisión de fecha por día exacto ===
+const esMismoDia = (d1, d2) => d1.toDateString() === d2.toDateString();
 
-function decodeJwtToken(token) {
-    try {
-        const base64Url = token.split('.')[1];
-        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-        }).join(''));
-        return JSON.parse(jsonPayload);
-    } catch (e) {
-        console.error("Error decodificando JWT:", e);
-        return null;
-    }
+// === MODO OSCURO AUTOMÁTICO SEGÚN SISTEMA ===
+if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    document.body.classList.add("dark-mode");
 }
-// --- FIN GESTIÓN DE CUENTAS ---
 
+// =====================================
+//           humanizador.js
+// =====================================
 
-// --- LÓGICA DE MEJORA DE PLAN ---
-const manejarMejorarPlan = async () => {
-    const textos = contenidoIdioma[idiomaActual];
-    const selectedPlan = upgradePlanOptions.value;
+// === MÓDULO DE UTILIDADES BÁSICAS ===
+// Proporciona funciones de utilidad generales como obtener elementos DOM,
+// seleccionar frases aleatorias y realizar parafraseo ligero.
+const Utils = (() => {
+    // Retorna el elemento DOM con el ID especificado.
+    const obtenerElemento = id => document.querySelector(`#${id}`);
 
-    if (!selectedPlan || !usuarioLogueado || !jwtToken) {
-        alert(textos.seleccionaPlan);
-        return;
-    }
+    // Selecciona una frase aleatoria de un array, evitando repetir las usadas si es posible.
+    const obtenerFraseAleatoria = (frases, usadas) => {
+        const disponibles = frases.filter(f => !usadas.has(f));
+        const fuente = disponibles.length > 0 ? disponibles : frases; // Si no hay disponibles, reusa todas
+        const seleccion = fuente[Math.floor(Math.random() * fuente.length)];
+        usadas.add(seleccion);
+        return seleccion;
+    };
 
-    // Aquí iría la integración con una pasarela de pago real.
-    // Por ahora, es una simulación de éxito.
-    const confirmacion = confirm(`${textos.confirmarMejoraPlan} ${PLAN_LIMITS_CLIENT[selectedPlan].name}?`);
-    if (!confirmacion) return;
+    // Mezcla palabras dentro de una oración para cambiar su estructura.
+    const mezclarPalabras = oracion => {
+        const palabras = oracion.split(" ");
+        if (palabras.length < 6) return oracion; // No mezclar frases muy cortas
+        const indice = Math.floor(Math.random() * (palabras.length - 3)) + 1; // Asegura al menos 1 palabra antes y 2 después
+        const parte1 = palabras.slice(0, indice).join(" ");
+        const parte2 = palabras.slice(indice).join(" ");
+        return `${parte2}, ${parte1}`; // Intercambia las partes
+    };
 
-    try {
-        const response = await fetch(`${API_BASE_URL}/upgrade-plan`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${jwtToken}`
-            },
-            body: JSON.stringify({ newPlan: selectedPlan })
+    // Realiza un parafraseo ligero reemplazando palabras o frases según una lista.
+    const parafrasearLigeramente = (oracion, reemplazos) => {
+        let resultado = oracion;
+        reemplazos.forEach(({ original, nuevo }) => {
+            const regex = new RegExp(original, "gi"); // 'gi' para global e insensible a mayúsculas/minúsculas
+            resultado = resultado.replace(regex, nuevo);
         });
+        return resultado;
+    };
 
-        const data = await response.json();
+    return {
+        obtenerElemento,
+        obtenerFraseAleatoria,
+        mezclarPalabras,
+        parafrasearLigeramente
+    };
+})();
 
-        if (!response.ok) {
-            alert(data.message || `${textos.errorOperacion} ${response.status}`);
-            if (upgradePlanMessage) {
-                upgradePlanMessage.textContent = data.message || `${textos.errorOperacion} ${response.status}`;
-                upgradePlanMessage.style.color = 'red';
-                upgradePlanMessage.style.display = 'block';
-            }
+// === MÓDULO DE MANEJO DE MENSAJES/NOTIFICACIONES ===
+// Gestiona la visualización de mensajes no intrusivos al usuario.
+const Notificaciones = (() => {
+    let timeoutId; // Para limpiar timeouts de mensajes anteriores
+
+    // Muestra un mensaje en la interfaz. Requiere CSS para `.notificacion`.
+    const mostrarMensaje = (mensaje, tipo = "info", duracion = 3000) => {
+        const contenedor = Utils.obtenerElemento('notificacionContainer');
+        if (!contenedor) {
+            console.error("Contenedor de notificaciones no encontrado.");
             return;
         }
 
-        jwtToken = data.token; // Actualizar el token con el nuevo plan
-        localStorage.setItem('jwt_token', jwtToken);
+        const mensajeElemento = document.createElement('div');
+        mensajeElemento.className = `notificacion ${tipo}`;
+        mensajeElemento.innerText = mensaje;
 
-        // Actualizar userPlanInfo con los nuevos datos del token
-        const decoded = decodeJwtToken(jwtToken);
-        if (decoded) {
-            // Actualizar usuarioLogueado y userPlanInfo con los nuevos datos del token
-            usuarioLogueado = { ...usuarioLogueado, ...decoded }; // Combina los datos existentes con los del token
-            userPlanInfo = {
-                plan_type: decoded.plan_type,
-                daily_attempts: decoded.daily_attempts,
-                word_count_today: decoded.word_count_today
-            };
-            localStorage.setItem('user_data', JSON.stringify(usuarioLogueado)); // Guardar el usuario actualizado
+        // Limpiar mensaje anterior si existe
+        if (contenedor.firstChild) {
+            contenedor.removeChild(contenedor.firstChild);
         }
+        contenedor.appendChild(mensajeElemento);
 
-        alert(data.message);
-        if (upgradePlanMessage) {
-            upgradePlanMessage.textContent = data.message;
-            upgradePlanMessage.style.color = 'green';
-            upgradePlanMessage.style.display = 'block';
-        }
+        // Forzar reflow para que la animación CSS se reinicie
+        void mensajeElemento.offsetWidth;
+        mensajeElemento.classList.add('show');
 
-        setTimeout(() => {
-            cerrarModalMejorarPlan();
-            actualizarContadorIntentosUI(); // Actualizar UI con el nuevo plan
-            actualizarBotonLoginUI();
-        }, 1500);
-
-    } catch (error) {
-        console.error('Error al mejorar el plan:', error);
-        alert(textos.errorConexionServidor);
-        if (upgradePlanMessage) {
-            upgradePlanMessage.textContent = textos.errorConexionServidor;
-            upgradePlanMessage.style.color = 'red';
-            upgradePlanMessage.style.display = 'block';
-        }
-    }
-};
-// --- FIN LÓGICA DE MEJORA DE PLAN ---
-
-
-// === CONTENIDO MULTI-IDIOMA ===
-const contenidoIdioma = {
-    es: {
-        tituloApp: "Humanizador G",
-        tituloPrincipal: "Humanizador G",
-        textoPlaceholder: "Pega tu texto aquí...",
-        labelTono: "Tono del texto:",
-        opcionNeutral: "Neutral",
-        opcionFormal: "Formal",
-        opcionConversacional: "Conversacional",
-        botonHumanizar: "Humanizar Texto",
-        botonCopiar: "Copiar Texto",
-        botonDescargar: "Descargar TXT",
-        tituloResultado: "Texto Humanizado",
-        originalStats: "Palabras originales:",
-        humanizedStats: "Palabras humanizadas:",
-        botonModoOscuro: "Alternar Modo Oscuro",
-        iniciarSesion: "Iniciar Sesión",
-        cerrarSesion: "Cerrar Sesión",
-        registrarCuenta: "Registrar Cuenta",
-        entrar: "Entrar",
-        registrar: "Registrar",
-        noTienesCuenta: "¿No tienes cuenta? Regístrate aquí.",
-        tienesCuenta: "¿Ya tienes cuenta? Inicia sesión aquí.",
-        alertaVacio: "Por favor, introduce un texto para humanizar.",
-        alertaCopiar: "Texto copiado al portapapeles.",
-        alertaErrorCopiar: "Error al copiar el texto.",
-        alertaHumanizarVacio: "No hay texto humanizado para copiar/descargar.",
-        alertaCamposVacios: "Por favor, completa todos los campos.",
-        alertaLimiteIntentos: `Has alcanzado el límite de intentos diarios para tu plan.`,
-        alertaLimitePalabras: `Excederías el límite de palabras diarias para tu plan.`,
-        intentosRestantes: "Intentos restantes",
-        intentosIlimitados: "Intentos disponibles: Ilimitados",
-        palabrasRestantes: "Palabras restantes hoy",
-        palabrasIlimitadas: "Palabras disponibles: Ilimitadas",
-        tuPlanActual: "Tu plan actual",
-        bienvenido: "¡Bienvenido/a",
-        sesionCerrada: "¡Sesión cerrada!",
-        confirmarCerrarSesion: "¿Estás seguro de que quieres cerrar la sesión?",
-        labelEmailLogin: "Email:",
-        labelEmailRegistro: "Email:",
-        labelPassword: "Contraseña:",
-        placeholderEmailLogin: "tu@email.com",
-        placeholderEmailRegistro: "nuevo.usuario@email.com",
-        errorCredenciales: "Email o contraseña incorrectos.",
-        errorUsuarioExistente: "Este email ya está registrado.",
-        errorOperacion: "Error en la operación:",
-        errorConexion: "Error de conexión con el servidor de autenticación.",
-        tituloModalMejorarPlan: "Mejora tu Plan",
-        textoMejorarPlan: "¡Has alcanzado los límites de tu plan actual! Mejora tu plan para humanizar más texto sin restricciones.",
-        razonLimite: "Razón: Has excedido el límite de intentos o palabras para tu plan actual. Para continuar usando Humanizador G sin límites, por favor, mejora tu plan.",
-        opcionStandard: "Estándar (30 intentos / 400 palabras)",
-        opcionPremium: "Premium (Ilimitado)",
-        botonMejorarAhora: "Mejorar Ahora",
-        seleccionaPlan: "Por favor, selecciona un plan.",
-        confirmarMejoraPlan: "¿Estás seguro de que quieres mejorar a este plan?",
-        errorConexionServidor: "Error de conexión con el servidor. Inténtalo de nuevo más tarde.",
-        mejorarPlanLink: "Mejorar Plan",
-
-
-        frasesRellenoNeutral: [
-            "En este sentido", "Por otro lado", "Además", "Sin embargo", "No obstante",
-            "Cabe destacar que", "Es importante señalar que", "De acuerdo con lo expuesto",
-            "Asimismo", "Por consiguiente", "En primer lugar", "En segundo lugar",
-            "Finalmente", "En definitiva", "Por lo tanto", "A modo de conclusión"
-        ],
-        reemplazosLigeros: [
-            { original: "es decir", nuevo: "o sea" },
-            { original: "por ende", nuevo: "por eso" },
-            { original: "así pues", nuevo: "entonces" },
-            { original: "no obstante", nuevo: "pero" },
-            { original: "cabe recalcar", nuevo: "hay que decir" }
-        ],
-        conversacionalAdiciones: [" sabes?", " eh?", " entiendes?", " claro?", " o sea,"],
-        conversacionalExclamacionChar: "¡",
-        frasesRellenoConversacional: [
-            "Y sabes qué?", "O sea,", "A ver,", "Pues mira,", "De verdad,", "En serio,",
-            "Imagínate,", "Te cuento,", "La verdad es que,", "Vamos a ver,", "Así que,"
-        ],
-        reemplazosFormales: [
-            { original: "por eso", nuevo: "por consiguiente" },
-            { original: "o sea", nuevo: "es decir" },
-            { original: "hay que decir", nuevo: "cabe recalcar" },
-            { original: "pero", nuevo: "no obstante" },
-            { original: "entonces", nuevo: "así pues" }
-        ],
-        frasesRellenoFormal: [
-            "En relación con lo antedicho", "Con referencia a lo expuesto", "Es menester subrayar que",
-            "A tenor de lo cual", "Por consiguiente", "Consecuentemente", "Aunado a lo anterior",
-            "Resulta pertinente destacar que", "En este orden de ideas", "Por lo tanto",
-            "En síntesis", "Para concluir"
-        ]
-    },
-    en: {
-        tituloApp: "Humanizer G",
-        tituloPrincipal: "Humanizer G",
-        textoPlaceholder: "Paste your text here...",
-        labelTono: "Text tone:",
-        opcionNeutral: "Neutral",
-        opcionFormal: "Formal",
-        opcionConversacional: "Conversational",
-        botonHumanizar: "Humanize Text",
-        botonCopiar: "Copy Text",
-        botonDescargar: "Download TXT",
-        tituloResultado: "Humanized Text",
-        originalStats: "Original words:",
-        humanizedStats: "Humanized words:",
-        botonModoOscuro: "Toggle Dark Mode",
-        iniciarSesion: "Log In",
-        cerrarSesion: "Log Out",
-        registrarCuenta: "Register Account",
-        entrar: "Enter",
-        registrar: "Register",
-        noTienesCuenta: "Don't have an account? Register here.",
-        tienesCuenta: "Already have an account? Log in here.",
-        alertaVacio: "Please enter text to humanize.",
-        alertaCopiar: "Text copied to clipboard.",
-        alertaErrorCopiar: "Error copying text.",
-        alertaHumanizarVacio: "No humanized text to copy/download.",
-        alertaCamposVacios: "Please fill in all fields.",
-        alertaLimiteIntentos: `You have reached the daily attempt limit for your plan.`,
-        alertaLimitePalabras: `You would exceed the daily word limit for your plan.`,
-        intentosRestantes: "Attempts remaining",
-        intentosIlimitados: "Attempts available: Unlimited",
-        palabrasRestantes: "Words remaining today",
-        palabrasIlimitadas: "Words available: Unlimited",
-        tuPlanActual: "Your current plan",
-        bienvenido: "Welcome",
-        sesionCerrada: "Session closed!",
-        confirmarCerrarSesion: "Are you sure you want to log out?",
-        labelEmailLogin: "Email:",
-        labelEmailRegistro: "Email:",
-        labelPassword: "Password:",
-        placeholderEmailLogin: "your@email.com",
-        placeholderEmailRegistro: "new.user@email.com",
-        errorCredenciales: "Incorrect email or password.",
-        errorUsuarioExistente: "This email is already registered.",
-        errorOperacion: "Error in operation:",
-        errorConexion: "Connection error with authentication server.",
-        tituloModalMejorarPlan: "Upgrade Your Plan",
-        textoMejorarPlan: "You have reached the limits of your current plan! Upgrade your plan to humanize more text without restrictions.",
-        razonLimite: "Reason: You have exceeded the attempt or word limit for your current plan. To continue using Humanizer G without limits, please upgrade your plan.",
-        opcionStandard: "Standard (30 attempts / 400 words)",
-        opcionPremium: "Premium (Unlimited)",
-        botonMejorarAhora: "Upgrade Now",
-        seleccionaPlan: "Please select a plan.",
-        confirmarMejoraPlan: "Are you sure you want to upgrade to this plan?",
-        errorConexionServidor: "Server connection error. Please try again later.",
-        mejorarPlanLink: "Upgrade Plan",
-
-        frasesRellenoNeutral: [
-            "In this regard", "On the other hand", "Additionally", "However", "Nevertheless",
-            "It is worth noting that", "It is important to point out that", "According to the above",
-            "Likewise", "Consequently", "Firstly", "Secondly",
-            "Finally", "In short", "Therefore", "By way of conclusion"
-        ],
-        reemplazosLigeros: [
-            { original: "that is to say", nuevo: "I mean" },
-            { original: "therefore", nuevo: "so" },
-            { original: "thus", nuevo: "then" },
-            { original: "nevertheless", nuevo: "but" },
-            { original: "it should be noted", nuevo: "it must be said" }
-        ],
-        conversacionalAdiciones: [" you know?", " huh?", " understand?", " right?", " I mean,"],
-        conversacionalExclamacionChar: "!",
-        frasesRellenoConversacional: [
-            "And you know what?", "I mean,", "Let's see,", "Well, look,", "Seriously,", "Really,",
-            "Imagine that,", "Let me tell you,", "The truth is,", "Let's find out,", "So,"
-        ],
-        reemplazosFormales: [
-            { original: "so", nuevo: "consequently" },
-            { original: "I mean", nuevo: "that is to say" },
-            { original: "it must be said", nuevo: "it should be noted" },
-            { original: "but", nuevo: "nevertheless" },
-            { original: "then", nuevo: "thus" }
-        ],
-        frasesRellenoFormal: [
-            "In relation to the foregoing", "With reference to the aforementioned", "It is necessary to emphasize that",
-            "It is necessary to emphasize that", "Consequently", "Consequently", "In addition to the above",
-            "It is pertinent to highlight that", "In this vein", "Therefore",
-            "In summary", "To conclude"
-        ]
-    }
-};
-
-let idiomaActual = localStorage.getItem("idiomaPreferido") || "es";
-
-const actualizarInterfaz = () => {
-    const textos = contenidoIdioma[idiomaActual];
-
-    const elementosPrincipales = [
-        { id: "tituloApp", text: textos.tituloApp },
-        { id: "tituloPrincipal", text: textos.tituloPrincipal },
-        { id: "textoOriginal", placeholder: textos.textoPlaceholder },
-        { id: "labelTono", text: textos.labelTono },
-        { id: "opcionNeutral", text: textos.opcionNeutral },
-        { id: "opcionFormal", text: textos.opcionFormal },
-        { id: "opcionConversacional", text: textos.opcionConversacional },
-        { id: "botonHumanizar", text: textos.botonHumanizar },
-        { id: "botonCopiar", text: textos.botonCopiar },
-        { id: "botonDescargar", text: textos.botonDescargar },
-        { id: "tituloResultado", text: textos.tituloResultado },
-        { id: "botonModoOscuro", text: textos.botonModoOscuro },
-        { id: "mejorarPlanLink", text: textos.mejorarPlanLink, isLink: true }, // Nuevo elemento
-    ];
-
-    elementosPrincipales.forEach(item => {
-        const el = obtenerElemento(item.id);
-        if (el) {
-            if (item.text !== undefined) {
-                if (item.isLink) {
-                    el.innerText = item.text;
-                } else {
-                    el.innerText = item.text;
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+            mensajeElemento.classList.remove('show');
+            mensajeElemento.addEventListener('transitionend', () => {
+                if (mensajeElemento.parentNode) { // Verificar si el elemento todavía tiene un padre
+                    mensajeElemento.parentNode.removeChild(mensajeElemento);
                 }
-            }
-            if (item.placeholder !== undefined) el.placeholder = item.placeholder;
+            }, { once: true }); // Eliminar listener después de la primera ejecución
+        }, duracion);
+    };
+
+    return {
+        mostrarMensaje
+    };
+})();
+
+// === MÓDULO DE TONOS ===
+// Contiene la lógica para aplicar diferentes tonos al texto.
+const Tonos = (() => {
+    // Genera un tono conversacional añadiendo adiciones, exclamaciones o cambiando mayúsculas.
+    const generarTonoConversacional = (oracion, adiciones, exclamacionChar) => {
+        let resultado = oracion;
+        const rand = Math.random();
+        if (rand < 0.3) { // 30% de probabilidad de añadir adición
+            resultado += adiciones;
+        } else if (rand < 0.6) { // 30% de probabilidad de exclamar (acumulado 0.3-0.6)
+            resultado = exclamacionChar + resultado + exclamacionChar;
+        } else if (rand < 0.9 && resultado.split(" ").length > 3) { // 30% de probabilidad de cambiar mayúsculas (acumulado 0.6-0.9)
+            const palabras = resultado.split(" ");
+            const indice = Math.floor(Math.random() * (palabras.length - 1));
+            palabras[indice] = palabras[indice].toLowerCase(); // Una palabra en minúsculas
+            resultado = palabras.join(" ");
         }
-    });
+        return resultado;
+    };
 
-    // Actualizar estadísticas de palabras (manteniendo el número actual si existe)
-    const originalStatsEl = obtenerElemento("originalStats");
-    if (originalStatsEl) {
-        const currentOriginalWords = originalStatsEl.innerText.split(": ")[1] || "0";
-        originalStatsEl.innerText = `${textos.originalStats} ${currentOriginalWords}`;
-    }
+    // Aplica un tono formal reemplazando ciertas palabras por otras más formales.
+    const generarTonoFormal = (oracion, reemplazosFormales) => {
+        let resultado = oracion;
+        reemplazosFormales.forEach(({ original, nuevo }) => {
+            const regex = new RegExp(original, "gi");
+            resultado = resultado.replace(regex, nuevo);
+        });
+        return resultado;
+    };
 
-    const humanizedStatsEl = obtenerElemento("humanizedStats");
-    if (humanizedStatsEl) {
-        const currentHumanizedWords = humanizedStatsEl.innerText.split(": ")[1] || "0";
-        humanizedStatsEl.innerText = `${textos.humanizedStats} ${currentHumanizedWords}`;
-    }
+    return {
+        generarTonoConversacional,
+        generarTonoFormal
+    };
+})();
 
-    // Actualizar elementos del modal solo si el modal está abierto o si es la carga inicial
-    const loginModalElement = obtenerElemento('loginModal');
-    if (loginModalElement && (loginModalElement.style.display === 'flex' || loginModalElement.style.display === 'block')) {
+// === MÓDULO DE LÍMITE DE INTENTOS ===
+// Gestiona el número de humanizaciones restantes para usuarios no logueados.
+const LimiteIntentos = (() => {
+    const MAX_INTENTOS = 5;
+    let intentosRestantes = MAX_INTENTOS;
+    let fechaUltimoReinicio = null;
+
+    // Guarda el estado actual de los intentos en localStorage.
+    const guardarEstadoIntentos = () => {
+        localStorage.setItem('intentosHumanizador', JSON.stringify({
+            restantes: intentosRestantes,
+            fechaReinicio: fechaUltimoReinicio ? fechaUltimoReinicio.toISOString() : null
+        }));
+    };
+
+    // Carga el estado de los intentos desde localStorage y reinicia si ha pasado un día.
+    const cargarEstadoIntentos = () => {
+        const estadoGuardado = localStorage.getItem('intentosHumanizador');
+        if (estadoGuardado) {
+            const estado = JSON.parse(estadoGuardado);
+            intentosRestantes = estado.restantes;
+            fechaUltimoReinicio = estado.fechaReinicio ? new Date(estado.fechaReinicio) : null;
+
+            const ahora = new Date();
+            if (fechaUltimoReinicio && (ahora.getTime() - fechaUltimoReinicio.getTime()) >= (24 * 60 * 60 * 1000)) {
+                resetIntentos(); // Reiniciar si ha pasado un día
+            }
+        }
+    };
+
+    // Resetea los intentos al máximo y limpia la fecha de reinicio.
+    const resetIntentos = () => {
+        intentosRestantes = MAX_INTENTOS;
+        fechaUltimoReinicio = null;
+        guardarEstadoIntentos();
+        actualizarContadorIntentosUI();
+    };
+
+    // Devuelve true si el usuario puede humanizar (logueado o con intentos restantes).
+    const puedeHumanizar = (isLoggedIn) => {
+        if (isLoggedIn) return true; // Usuarios logueados no tienen límite
+        return intentosRestantes > 0;
+    };
+
+    // Consume un intento si el usuario no está logueado.
+    const consumirIntento = (isLoggedIn) => {
+        if (!isLoggedIn) {
+            intentosRestantes--;
+            if (intentosRestantes < MAX_INTENTOS && !fechaUltimoReinicio) {
+                fechaUltimoReinicio = new Date(); // Establecer la fecha de reinicio la primera vez que se gasta un intento
+            }
+            guardarEstadoIntentos();
+        }
+        actualizarContadorIntentosUI();
+    };
+
+    // Actualiza el texto del contador de intentos en la UI.
+    const actualizarContadorIntentosUI = () => {
+        // Necesitamos el módulo i18n para obtener los textos traducidos.
+        // Esto se manejará en la inicialización o a través de una inyección de dependencia si fuera más complejo.
+        // Por ahora, asumimos que i18n.getTextos() está disponible globalmente o se pasa.
+        const textos = i18n.getTextos();
+        Utils.obtenerElemento('contadorIntentos').innerText = `${textos.intentosRestantes}: ${intentosRestantes}`;
+    };
+
+    return {
+        cargarEstadoIntentos,
+        puedeHumanizar,
+        consumirIntento,
+        resetIntentos,
+        actualizarContadorIntentosUI,
+        MAX_INTENTOS // Exportar para mensajes de alerta
+    };
+})();
+
+// === MÓDULO DE AUTENTICACIÓN ===
+// Gestiona el login, registro y cierre de sesión de usuarios.
+const Auth = (() => {
+    let usuarioLogueado = localStorage.getItem('usuarioActual') || null;
+    let esModoRegistro = false;
+
+    // Abre el modal de login/registro.
+    const abrirModal = () => {
+        Utils.obtenerElemento('loginModal').style.display = 'block';
+        Utils.obtenerElemento('username').value = '';
+        Utils.obtenerElemento('password').value = '';
+        esModoRegistro = false; // Siempre inicia en modo login por defecto
         actualizarModalUI();
-    }
+    };
 
-    // Actualizar el modal de mejora de plan
-    const upgradeModalTitle = obtenerElemento('upgradeModalTitle');
-    const upgradePlanOptionStandard = obtenerElemento('upgradePlanOptionStandard');
-    const upgradePlanOptionPremium = obtenerElemento('upgradePlanOptionPremium');
-    const upgradePlanButtonEl = obtenerElemento('upgradePlanButton');
+    // Cierra el modal de login/registro.
+    const cerrarModal = () => {
+        Utils.obtenerElemento('loginModal').style.display = 'none';
+    };
 
-    if (upgradeModalTitle) upgradeModalTitle.innerText = textos.tituloModalMejorarPlan;
-    if (upgradePlanMessage) upgradePlanMessage.innerText = textos.textoMejorarPlan;
-    if (upgradePlanOptionStandard) upgradePlanOptionStandard.innerText = textos.opcionStandard;
-    if (upgradePlanOptionPremium) upgradePlanOptionPremium.innerText = textos.opcionPremium;
-    if (upgradePlanButtonEl) upgradePlanButtonEl.innerText = textos.botonMejorarAhora;
+    // Actualiza el texto del botón de login/logout en la UI.
+    const actualizarBotonLoginUI = () => {
+        const boton = Utils.obtenerElemento('botonLogin');
+        const textos = i18n.getTextos();
+        if (usuarioLogueado) {
+            boton.innerText = `${textos.cerrarSesion} (${usuarioLogueado})`;
+            boton.onclick = cerrarSesion;
+        } else {
+            boton.innerText = textos.iniciarSesion;
+            boton.onclick = abrirModal;
+        }
+    };
 
-    actualizarBotonLoginUI();
-    actualizarContadorIntentosUI();
-};
+    // Actualiza el contenido del modal de login/registro según el modo actual.
+    const actualizarModalUI = () => {
+        const textos = i18n.getTextos();
+        Utils.obtenerElemento('modalTitulo').innerText = esModoRegistro ? textos.registrarCuenta : textos.iniciarSesion;
+        Utils.obtenerElemento('submitAuth').innerText = esModoRegistro ? textos.registrar : textos.entrar;
+        Utils.obtenerElemento('linkRegistro').innerText = esModoRegistro ? textos.tienesCuenta : textos.noTienesCuenta;
+        // Mostrar planes solo en registro
+        if (Utils.obtenerElemento('planesEnRegistro')) {
+            Utils.obtenerElemento('planesEnRegistro').style.display = esModoRegistro ? 'block' : 'none';
+        }
+    };
 
+    // Alterna entre el modo de registro y el modo de login.
+    const alternarModoAuth = (event) => {
+        event.preventDefault();
+        esModoRegistro = !esModoRegistro;
+        actualizarModalUI();
+    };
+
+    // Maneja el envío del formulario de autenticación (login o registro).
+    const manejarAutenticacion = (event) => {
+        event.preventDefault();
+
+        const username = Utils.obtenerElemento('username').value.trim();
+        const password = Utils.obtenerElemento('password').value.trim();
+        const textos = i18n.getTextos();
+
+        if (!username || !password) {
+            Notificaciones.mostrarMensaje(textos.alertaCamposVacios, 'warning');
+            return;
+        }
+
+        let cuentas = JSON.parse(localStorage.getItem('cuentasHumanizador')) || {};
+
+        if (esModoRegistro) {
+            if (cuentas[username]) {
+                Notificaciones.mostrarMensaje(textos.alertaUsuarioExistente, 'error');
+            } else {
+                cuentas[username] = password; // En un entorno real, esto sería hasheado
+                localStorage.setItem('cuentasHumanizador', JSON.stringify(cuentas));
+                Notificaciones.mostrarMensaje(textos.registroExitoso, 'success');
+                usuarioLogueado = username;
+                localStorage.setItem('usuarioActual', username);
+                cerrarModal();
+                actualizarBotonLoginUI();
+                LimiteIntentos.resetIntentos(); // Reiniciar intentos al registrarse
+            }
+        } else {
+            if (cuentas[username] && cuentas[username] === password) {
+                usuarioLogueado = username;
+                localStorage.setItem('usuarioActual', username);
+                Notificaciones.mostrarMensaje(`${textos.bienvenido} ${username}!`, 'success');
+                cerrarModal();
+                actualizarBotonLoginUI();
+                LimiteIntentos.resetIntentos(); // Reiniciar intentos al iniciar sesión
+            } else {
+                Notificaciones.mostrarMensaje(textos.credencialesInvalidas, 'error');
+            }
+        }
+    };
+
+    // Cierra la sesión del usuario actual.
+    const cerrarSesion = () => {
+        const textos = i18n.getTextos();
+        if (confirm(textos.confirmarCerrarSesion)) {
+            usuarioLogueado = null;
+            localStorage.removeItem('usuarioActual');
+            actualizarBotonLoginUI();
+            Notificaciones.mostrarMensaje(textos.sesionCerrada, 'info');
+            LimiteIntentos.resetIntentos(); // Reiniciar intentos al cerrar sesión
+        }
+    };
+
+    // Retorna el usuario actualmente logueado.
+    const getUsuarioLogueado = () => usuarioLogueado;
+
+    return {
+        abrirModal,
+        cerrarModal,
+        actualizarBotonLoginUI,
+        actualizarModalUI,
+        alternarModoAuth,
+        manejarAutenticacion,
+        cerrarSesion,
+        getUsuarioLogueado
+    };
+})();
+
+// === MÓDULO DE INTERNACIONALIZACIÓN (i18n) ===
+// Gestiona el contenido multi-idioma de la aplicación.
+const i18n = (() => {
+    const contenidoIdioma = {
+        es: {
+            tituloApp: "Humanizador G",
+            placeholder: "Pega tu texto aquí...",
+            labelTono: "Tono del texto:",
+            opcionNeutral: "Neutral",
+            opcionFormal: "Formal",
+            opcionConversacional: "Conversacional",
+            botonHumanizar: "Humanizar",
+            botonCopiar: "Copiar",
+            botonDescargar: "Descargar TXT",
+            tituloResultado: "Texto Humanizado",
+            botonModoOscuro: "Alternar Modo Oscuro",
+            alertaVacio: "Por favor, ingresa un texto.",
+            alertaCopiar: "Texto copiado al portapapeles.",
+            alertaErrorCopiar: "Error al copiar el texto.",
+            alertaHumanizarVacio: "Primero debes humanizar un texto.",
+            originalStats: "Palabras originales:",
+            humanizedStats: "Palabras humanizadas:",
+            labelIdioma: "Idioma:",
+            intentosRestantes: "Intentos restantes",
+            alertaLimiteIntentos: `Has alcanzado el límite de ${LimiteIntentos.MAX_INTENTOS} humanizaciones diarias. Inicia sesión para más o intenta de nuevo mañana.`,
+
+            iniciarSesion: "Iniciar Sesión",
+            cerrarSesion: "Cerrar Sesión",
+            modalTitulo: "Iniciar Sesión",
+            labelUsername: "Usuario:",
+            labelPassword: "Contraseña:",
+            entrar: "Entrar",
+            registrar: "Registrar",
+            noTienesCuenta: "¿No tienes cuenta? Regístrate aquí.",
+            tienesCuenta: "¿Ya tienes cuenta? Inicia sesión aquí.",
+            registrarCuenta: "Registrar Cuenta",
+            alertaCamposVacios: "Por favor, completa ambos campos.",
+            alertaUsuarioExistente: "Este usuario ya existe. Intenta con otro o inicia sesión.",
+            registroExitoso: "Cuenta creada exitosamente. ¡Bienvenido!",
+            credencialesInvalidas: "Usuario o contraseña incorrectos.",
+            bienvenido: "Bienvenido/a",
+            confirmarCerrarSesion: "¿Estás seguro de que quieres cerrar sesión?",
+            sesionCerrada: "Sesión cerrada.",
+
+            frasesRellenoNeutral: ["A decir verdad", "Vale la pena considerar que", "Según lo que se sabe hasta ahora", "Desde un punto de vista práctico", "Si bien es cierto", "Parece relevante señalar que", "Aunque podría discutirse", "En algunos casos se cree que", "No obstante, cabe recordar que", "Con base en algunos datos", "Hay quienes sostienen que", "Desde otra perspectiva", "Según algunas fuentes", "Es debatible, pero", "Muchos piensan que", "A mi parecer", "En lo personal, creo que", "Curiosamente", "Y eso que no es todo", "Sin afán de sonar tajante", "Mucha gente no lo ve así, pero"],
+            frasesRellenoConversacional: ["Mira tú por dónde", "Fíjate qué curioso", "Pues bien", "Oye", "¿Sabes qué te digo?", "A ver", "Bueno, bueno", "Anda mira", "Te digo una cosa", "Y es que...", "La verdad sea dicha", "Si me permites la expresión", "Para que te hagas una idea", "En plan...", "¿Me explico?", "No sé si me entiendes", "El caso es que...", "Al final del día", "Vaya tela", "Madre mía"],
+            frasesRellenoFormal: ["En efecto", "Cabe señalar que", "Es menester indicar que", "Resulta pertinente destacar que", "Desde esta perspectiva", "En relación con lo anterior", "Por consiguiente", "De acuerdo con lo expuesto", "En virtud de ello", "Es preciso subrayar que", "A mayor abundamiento", "En este sentido", "Consecuentemente", "Así pues", "Por lo tanto", "Se infiere que", "De lo antedicho se desprende que", "En atención a lo cual", "Conviene recordar que", "Es de suma importancia mencionar que"],
+
+            reemplazosLigeros: [
+                { original: "\\b(es definida por)\\b", nuevo: "suele considerarse como" },
+                { original: "\\b(como)\\b", nuevo: "tal como" },
+                { original: "\\b(se reconoce como)\\b", nuevo: "también se ve como" },
+                { original: "\\b(han estado presentes)\\b", nuevo: "han tenido presencia" },
+                { original: "\\b(a lo largo de la historia)\\b", nuevo: "con el paso del tiempo" },
+                { original: "\\b(es difícil de determinar)\\b", nuevo: "no es fácil de precisar" },
+                { original: "\\b(de manera consistente)\\b", nuevo: "de forma continua" },
+                { original: "\\b(más probabilidades de)\\b", nuevo: "mayor propensión a" },
+                { original: "\\b(lo cual)\\b", nuevo: "lo que" },
+                { original: "\\b(esto puede)\\b", nuevo: "es posible que esto" },
+                { original: "\\b(por ejemplo)\\b", nuevo: "por decir algo" },
+                { original: "\\b(en términos generales)\\b", nuevo: "si se mira de forma amplia" },
+                { original: "\\b(se puede decir que)\\b", nuevo: "algunos sostienen que" },
+                { original: "\\b(es importante destacar)\\b", nuevo: "vale la pena considerar" },
+                { original: "\\b(implica)\\b", nuevo: "conlleva" },
+                { original: "\\b(decisiones)\\b", nuevo: "resoluciones" },
+                { original: "\\b(acciones)\\b", nuevo: "conductas" }
+            ],
+
+            reemplazosFormales: [
+                { original: "\\b(creo)\\b", nuevo: "considero" },
+                { original: "\\b(pienso)\\b", nuevo: "estimo" },
+                { original: "\\b(mucha gente)\\b", nuevo: "numerosas personas" },
+                { original: "\\b(cosa)\\b", nuevo: "elemento" },
+                { original: "\\b(así)\\b", nuevo: "de esta manera" },
+                { original: "\\b(pero)\\b", nuevo: "sin embargo" },
+                { original: "\\b(y)\\b", nuevo: "además" }
+            ],
+            conversacionalAdiciones: "¿No crees?",
+            conversacionalExclamacionChar: "¡",
+        },
+        en: {
+            tituloApp: "Humanizer G",
+            placeholder: "Paste your text here...",
+            labelTono: "Text tone:",
+            opcionNeutral: "Neutral",
+            opcionFormal: "Formal",
+            opcionConversacional: "Conversational",
+            botonHumanizar: "Humanize",
+            botonCopiar: "Copy",
+            botonDescargar: "Download TXT",
+            tituloResultado: "Humanized Text",
+            botonModoOscuro: "Toggle Dark Mode",
+            alertaVacio: "Please enter some text.",
+            alertaCopiar: "Text copied to clipboard.",
+            alertaErrorCopiar: "Error copying text.",
+            alertaHumanizarVacio: "You must humanize text first.",
+            originalStats: "Original words:",
+            humanizedStats: "Humanized words:",
+            labelIdioma: "Language:",
+            intentosRestantes: "Attempts remaining",
+            alertaLimiteIntentos: `You have reached the limit of ${LimiteIntentos.MAX_INTENTOS} daily humanizations. Log in for more or try again tomorrow.`,
+
+            iniciarSesion: "Login",
+            cerrarSesion: "Logout",
+            modalTitulo: "Login",
+            labelUsername: "Username:",
+            labelPassword: "Password:",
+            entrar: "Enter",
+            registrar: "Register",
+            noTienesCuenta: "Don't have an account? Register here.",
+            tienesCuenta: "Already have an account? Login here.",
+            registrarCuenta: "Register Account",
+            alertaCamposVacios: "Please fill in both fields.",
+            alertaUsuarioExistente: "This username already exists. Try another or log in.",
+            registroExitoso: "Account created successfully. Welcome!",
+            credencialesInvalidas: "Incorrect username or password.",
+            bienvenido: "Welcome",
+            confirmarCerrarSesion: "Are you sure you want to log out?",
+            sesionCerrada: "Logged out.",
+
+            frasesRellenoNeutral: ["To be honest", "It's worth considering that", "According to current knowledge", "From a practical standpoint", "While it is true", "It seems relevant to point out that", "Although it could be argued", "In some cases it is believed that", "Nevertheless, it's worth remembering that", "Based on some data", "Some people argue that", "From another perspective", "According to some sources", "It's debatable, but", "Many people think that", "In my opinion", "Personally, I believe that", "Curiously enough", "And that's not all", "Without wanting to sound blunt", "Many people don't see it that way, but"],
+            frasesRellenoConversacional: ["Well, what do you know", "Isn't that interesting", "So then", "Hey", "You know what I mean?", "Let's see", "Well, well", "Oh, look", "I'll tell you something", "And it's just that...", "Truth be told", "If you'll allow me the expression", "To give you an idea", "Like...", "Am I making sense?", "I don't know if you understand me", "The thing is...", "At the end of the day", "What a mess", "Oh my goodness"],
+            frasesRellenoFormal: ["Indeed", "It should be noted that", "It is necessary to indicate that", "It is pertinent to emphasize that", "From this perspective", "In relation to the foregoing", "Consequently", "In accordance with what has been stated", "By virtue thereof", "It is essential to underscore that", "For further clarification", "In this regard", "Accordingly", "Thus", "Therefore", "It can be inferred that", "From the foregoing it follows that", "In view of which", "It is advisable to remember that", "It is of utmost importance to mention that"],
+
+            reemplazosLigeros: [
+                { original: "\\b(is defined by)\\b", nuevo: "is often considered as" },
+                { original: "\\b(as)\\b", nuevo: "such as" },
+                { original: "\\b(is recognized as)\\b", nuevo: "is also seen as" },
+                { original: "\\b(have been present)\\b", nuevo: "have had a presence" },
+                { original: "\\b(throughout history)\\b", nuevo: "over time" },
+                { original: "\\b(is difficult to determine)\\b", nuevo: "is not easy to ascertain" },
+                { original: "\\b(consistently)\\b", nuevo: "continuously" },
+                { original: "\\b(more likely to)\\b", nuevo: "more prone to" },
+                { original: "\\b(which)\\b", nuevo: "what" },
+                { original: "\\b(this may)\\b", nuevo: "it is possible that this" },
+                { original: "\\b(for example)\\b", nuevo: "for instance" },
+                { original: "\\b(in general terms)\\b", nuevo: "if viewed broadly" },
+                { original: "\\b(it can be said that)\\b", nuevo: "some argue that" },
+                { original: "\\b(it is important to highlight)\\b", nuevo: "it is worth considering" },
+                { original: "\\b(implies)\\b", nuevo: "entails" },
+                { original: "\\b(decisions)\\b", nuevo: "resolutions" },
+                { original: "\\b(actions)\\b", nuevo: "behaviors" }
+            ],
+
+            reemplazosFormales: [
+                { original: "\\b(I think)\\b", nuevo: "I consider" },
+                { original: "\\b(I believe)\\b", nuevo: "I estimate" },
+                { original: "\\b(many people)\\b", nuevo: "numerous individuals" },
+                { original: "\\b(thing)\\b", nuevo: "element" },
+                { original: "\\b(so)\\b", nuevo: "in this manner" },
+                { original: "\\b(but)\\b", nuevo: "however" },
+                { original: "\\b(and)\\b", nuevo: "additionally" }
+            ],
+            conversacionalAdiciones: "Don't you think?",
+            conversacionalExclamacionChar: "!",
+        }
+    };
+
+    let idiomaActual = localStorage.getItem("idiomaPreferido") || "es";
+
+    // Retorna el idioma actual seleccionado.
+    const getIdiomaActual = () => idiomaActual;
+    // Retorna el objeto de textos para el idioma actual.
+    const getTextos = () => contenidoIdioma[idiomaActual];
+
+    // Establece un nuevo idioma y lo guarda en localStorage.
+    const setIdioma = (idioma) => {
+        idiomaActual = idioma;
+        localStorage.setItem("idiomaPreferido", idiomaActual);
+    };
+
+    // Actualiza todos los elementos de la interfaz de usuario con los textos del idioma actual.
+    const actualizarInterfaz = () => {
+        const textos = getTextos();
+
+        document.title = textos.tituloApp;
+        Utils.obtenerElemento("tituloPrincipal").innerText = textos.tituloApp;
+        Utils.obtenerElemento("textoOriginal").placeholder = textos.placeholder;
+        Utils.obtenerElemento("labelTono").innerText = textos.labelTono;
+        Utils.obtenerElemento("opcionNeutral").innerText = textos.opcionNeutral;
+        Utils.obtenerElemento("opcionFormal").innerText = textos.opcionFormal;
+        Utils.obtenerElemento("opcionConversacional").innerText = textos.opcionConversacional;
+        Utils.obtenerElemento("botonHumanizar").innerText = textos.botonHumanizar;
+        Utils.obtenerElemento("botonCopiar").innerText = textos.botonCopiar;
+        Utils.obtenerElemento("botonDescargar").innerText = textos.botonDescargar;
+        Utils.obtenerElemento("tituloResultado").innerText = textos.tituloResultado;
+        Utils.obtenerElemento("botonModoOscuro").innerText = textos.botonModoOscuro;
+        Utils.obtenerElemento("originalStats").innerText = textos.originalStats + " 0";
+        Utils.obtenerElemento("humanizedStats").innerText = textos.humanizedStats + " 0";
+        Utils.obtenerElemento("labelIdioma").innerText = textos.labelIdioma;
+
+        LimiteIntentos.actualizarContadorIntentosUI();
+        Auth.actualizarBotonLoginUI();
+        if (Utils.obtenerElemento('loginModal').style.display === 'block') {
+            Auth.actualizarModalUI();
+        }
+        Utils.obtenerElemento("selectorIdioma").value = idiomaActual;
+    };
+
+    return {
+        getIdiomaActual,
+        getTextos,
+        setIdioma,
+        actualizarInterfaz
+    };
+})();
 
 // === FUNCIÓN PRINCIPAL DE HUMANIZACIÓN ===
-const humanizar = async () => {
-    const entrada = obtenerElemento("textoOriginal");
-    const salida = obtenerElemento("textoHumanizado");
-    const contenedorResultado = obtenerElemento("resultado"); // Asegúrate de que este ID exista en tu HTML
-    const estiloTono = obtenerElemento("estiloTono");
+// Contiene la lógica central para procesar y humanizar el texto.
+const Humanizador = (() => {
+    const humanizar = () => {
+        const entrada = Utils.obtenerElemento("textoOriginal");
+        const salida = Utils.obtenerElemento("textoHumanizado");
+        const contenedorResultado = Utils.obtenerElemento("resultado");
+        const estiloTono = Utils.obtenerElemento("estiloTono").value;
 
-    if (!entrada || !salida || !estiloTono) {
-        console.error("No se encontraron todos los elementos necesarios para humanizar.");
-        return;
-    }
+        const textos = i18n.getTextos();
+        const texto = entrada.value.trim();
 
-    const textos = contenidoIdioma[idiomaActual];
-
-    const texto = entrada.value.trim();
-    if (!texto) {
-        mostrarMensajeModal(textos.alertaVacio, true, 'mainMessage'); // Usar un nuevo elemento para mensajes principales
-        return;
-    }
-
-    const palabrasOriginales = texto.split(/\s+/).filter(word => word.length > 0).length;
-    let humanizedText = texto; // Inicializar con el texto original
-
-    // Mostrar mensaje de "Humanizando..." en la interfaz principal si existe un elemento para ello
-    mostrarMensajeModal('Humanizando texto...', false, 'mainMessage');
-
-
-    if (!usuarioLogueado) {
-        // Para usuarios no logueados, aplicar límites del plan 'free'
-        const planFree = PLAN_LIMITS_CLIENT.free;
-        if (planFree.attempts !== Infinity && (!userPlanInfo || userPlanInfo.daily_attempts >= planFree.attempts)) {
-            needsUpgradeAfterAction = true;
-            abrirModal(); // Pedir login/registro
-            mostrarMensajeModal(`${textos.alertaLimiteIntentos} ${planFree.name} (Gratis). Por favor, inicia sesión o regístrate para continuar.`, true, 'modalMessage');
-            mostrarMensajeModal('', false, 'mainMessage'); // Limpiar mensaje principal
-            return;
-        }
-        if (planFree.word_limit !== Infinity && (palabrasOriginales > planFree.word_limit)) {
-            needsUpgradeAfterAction = true;
-            abrirModal(); // Pedir login/registro
-            mostrarMensajeModal(`${textos.alertaLimitePalabras} ${planFree.name} (Gratis). Por favor, inicia sesión o regístrate para continuar.`, true, 'modalMessage');
-            mostrarMensajeModal('', false, 'mainMessage'); // Limpiar mensaje principal
+        if (!texto) {
+            Notificaciones.mostrarMensaje(textos.alertaVacio, 'warning');
             return;
         }
 
-        // Si no hay usuario logueado y pasa los checks de límite, humanizar en el cliente
-        const frasesRellenoNeutral = textos.frasesRellenoNeutral || [];
-        const frasesRellenoConversacional = textos.frasesRellenoConversacional || [];
-        const frasesRellenoFormal = textos.frasesRellenoFormal || [];
-
-        let frasesRelleno;
-        let reemplazos;
-
-        switch (estiloTono.value) {
-            case "formal":
-                frasesRelleno = frasesRellenoFormal;
-                reemplazos = textos.reemplazosFormales;
-                humanizedText = generarTonoFormal(humanizedText, reemplazos);
-                humanizedText = humanizedText.split('. ').map(sent => {
-                    if (sent.length > 0 && Math.random() < 0.2 && frasesRelleno.length > 0) {
-                        return sent + ". " + frasesRelleno[Math.floor(Math.random() * frasesRelleno.length)] + ".";
-                    }
-                    return sent;
-                }).join(' ').trim();
-                break;
-            case "conversacional":
-                frasesRelleno = frasesRellenoConversacional;
-                humanizedText = generarTonoConversacional(humanizedText, textos.conversacionalAdiciones, textos.conversacionalExclamacionChar);
-                humanizedText = humanizedText.split('. ').map(sent => {
-                    if (sent.length > 0 && Math.random() < 0.2 && frasesRelleno.length > 0) {
-                        return sent + ". " + frasesRelleno[Math.floor(Math.random() * frasesRelleno.length)] + ".";
-                    }
-                    return sent;
-                }).join(' ').trim();
-                break;
-            case "neutral":
-            default:
-                frasesRelleno = frasesRellenoNeutral;
-                reemplazos = textos.reemplazosLigeros;
-                humanizedText = parafrasearLigeramente(humanizedText, reemplazos);
-                humanizedText = humanizedText.split('. ').map(sent => {
-                    if (sent.length > 0 && Math.random() < 0.1 && frasesRelleno.length > 0) {
-                        return sent + ". " + frasesRelleno[Math.floor(Math.random() * frasesRelleno.length)] + ".";
-                    }
-                    return sent;
-                }).join(' ').trim();
-                break;
+        if (!LimiteIntentos.puedeHumanizar(Auth.getUsuarioLogueado())) {
+            Notificaciones.mostrarMensaje(textos.alertaLimiteIntentos, 'info');
+            return;
         }
 
-        salida.textContent = humanizedText;
-        obtenerElemento('originalStats').textContent = `${textos.originalStats} ${palabrasOriginales}`;
-        obtenerElemento('humanizedStats').textContent = `${textos.humanizedStats} ${contarPalabras(humanizedText)}`;
-        mostrarMensajeModal('', false, 'mainMessage'); // Limpiar mensaje
-        actualizarContadorIntentosUI(); // Actualizar contador de intentos para el plan free
-        return; // Terminar la función aquí si se humaniza en el cliente
-    }
+        const palabrasOriginales = texto.split(/\s+/).length;
+        // Usa directamente las frases de relleno del objeto de idioma actual
+        const frasesRelleno = textos[`frasesRelleno${estiloTono.charAt(0).toUpperCase() + estiloTono.slice(1)}`] || textos.frasesRellenoNeutral;
 
-    // Si el usuario está logueado, se humaniza en el servidor
-    try {
-        const response = await fetch(`${API_BASE_URL}/humanize`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${jwtToken}`
-            },
-            body: JSON.stringify({
-                originalText: texto,
-                tone: estiloTono.value,
-                wordCount: palabrasOriginales // Enviar el conteo de palabras para la validación del backend
-            })
-        });
+        const oraciones = texto
+            .replace(/\n/g, " ") // Reemplaza saltos de línea por espacios
+            .split(/(?<=[.!?])\s+/) // Divide por puntos, signos de exclamación/interrogación seguidos de espacio
+            .map(o => o.trim()) // Elimina espacios al inicio/final de cada oración
+            .filter(o => o.length > 5); // Filtra oraciones muy cortas
 
-        const data = await response.json();
+        const usadas = new Set(); // Para no repetir frases de relleno en la misma humanización
 
-        if (response.ok) {
-            salida.textContent = data.humanizedText;
-            obtenerElemento('originalStats').textContent = `${textos.originalStats} ${palabrasOriginales}`;
-            obtenerElemento('humanizedStats').textContent = `${textos.humanizedStats} ${contarPalabras(data.humanizedText)}`;
-            mostrarMensajeModal(data.message || 'Texto humanizado con éxito.', false, 'mainMessage');
+        const textoHumanizado = oraciones.map(oracion => {
+            oracion = Sinonimos.reemplazar(oracion);
+            let parafraseada = Utils.parafrasearLigeramente(oracion, textos.reemplazosLigeros);
 
-            // Actualizar la información del usuario desde la respuesta del servidor
-            if (data.user) {
-                usuarioLogueado = data.user;
-                userPlanInfo = {
-                    plan_type: usuarioLogueado.plan_type,
-                    daily_attempts: usuarioLogueado.daily_attempts,
-                    word_count_today: usuarioLogueado.word_count_today
-                };
-                localStorage.setItem('user_data', JSON.stringify(usuarioLogueado));
-                actualizarContadorIntentosUI();
+            if (Math.random() < 0.4) { // 40% de probabilidad de mezclar palabras
+                parafraseada = Utils.mezclarPalabras(parafraseada);
             }
 
-        } else {
-            let errorMessage = data.message || textos.errorOperacion;
-            if (response.status === 403) { // Prohibido, usualmente por límites
-                mostrarMensajeModal(errorMessage, true, 'mainMessage');
-                abrirModalMejorarPlan(errorMessage, data.reason_code); // Pasar la razón si el backend la envía
-            } else if (response.status === 401) { // No autorizado, token inválido o expirado
-                mostrarMensajeModal(errorMessage, true, 'mainMessage');
-                cerrarSesion(); // Forzar cierre de sesión si el token es inválido
-                abrirModal(); // Y pedir login
-            } else {
-                mostrarMensajeModal(errorMessage, true, 'mainMessage');
+            if (estiloTono === "conversacional") {
+                parafraseada = Tonos.generarTonoConversacional(parafraseada, textos.conversacionalAdiciones, textos.conversacionalExclamacionChar);
+            } else if (estiloTono === "formal") {
+                parafraseada = Tonos.generarTonoFormal(parafraseada, textos.reemplazosFormales);
             }
+
+            const frase = Utils.obtenerFraseAleatoria(frasesRelleno, usadas);
+            const contenido = parafraseada.charAt(0).toLowerCase() + parafraseada.slice(1); // La primera letra de la oración en minúscula
+
+            // Inserta la frase de relleno al inicio o al final
+            return Math.random() > 0.5
+                ? `${frase}, ${contenido}`
+                : `${contenido}, ${frase.toLowerCase()}`;
+        }).join(" ");
+
+        salida.innerText = textoHumanizado;
+        contenedorResultado.style.display = "block";
+        contenedorResultado.classList.add("fade-in");
+
+        const palabrasHumanizadas = textoHumanizado.split(/\s+/).length;
+        Utils.obtenerElemento("originalStats").innerText = `${textos.originalStats} ${palabrasOriginales}`;
+        Utils.obtenerElemento("humanizedStats").innerText = `${textos.humanizedStats} ${palabrasHumanizadas}`;
+
+        LimiteIntentos.consumirIntento(Auth.getUsuarioLogueado());
+    };
+
+    // Copia el texto humanizado al portapapeles.
+    const copiarTexto = () => {
+        const texto = Utils.obtenerElemento("textoHumanizado").innerText;
+        const textos = i18n.getTextos();
+        if (!texto) {
+            Notificaciones.mostrarMensaje(textos.alertaHumanizarVacio, 'warning');
+            return;
         }
-    } catch (error) {
-        console.error('Error al humanizar el texto:', error);
-        mostrarMensajeModal(textos.errorConexionServidor, true, 'mainMessage');
-    } finally {
-        setTimeout(() => {
-            mostrarMensajeModal('', false, 'mainMessage'); // Limpiar mensaje
-        }, 3000);
-    }
-};
 
-// --- MODO OSCURO ---
-const toggleModoOscuro = () => {
-    document.body.classList.toggle('dark-mode');
-    const isDarkMode = document.body.classList.contains('dark-mode');
-    localStorage.setItem('darkMode', isDarkMode ? 'enabled' : 'disabled');
-};
+        navigator.clipboard.writeText(texto)
+            .then(() => Notificaciones.mostrarMensaje(textos.alertaCopiar, 'success'))
+            .catch(() => Notificaciones.mostrarMensaje(textos.alertaErrorCopiar, 'error'));
+    };
 
-const cargarModoOscuro = () => {
-    if (localStorage.getItem('darkMode') === 'enabled') {
-        document.body.classList.add('dark-mode');
-    }
-};
+    // Descarga el texto humanizado como un archivo TXT.
+    const descargarComoTxt = () => {
+        const texto = Utils.obtenerElemento("textoHumanizado").innerText;
+        const textos = i18n.getTextos();
+        if (!texto) {
+            Notificaciones.mostrarMensaje(textos.alertaHumanizarVacio, 'warning');
+            return;
+        }
 
-// --- COPIAR Y DESCARGAR ---
-const copiarTexto = () => {
-    const salida = obtenerElemento("textoHumanizado");
-    const textos = contenidoIdioma[idiomaActual];
-    if (salida && salida.textContent.trim()) {
-        navigator.clipboard.writeText(salida.textContent)
-            .then(() => mostrarMensajeModal(textos.alertaCopiar, false, 'mainMessage'))
-            .catch(err => {
-                console.error('Error al copiar el texto:', err);
-                mostrarMensajeModal(textos.alertaErrorCopiar, true, 'mainMessage');
+        const blob = new Blob([texto], { type: "text/plain" });
+        const enlace = document.createElement("a");
+        enlace.href = URL.createObjectURL(blob);
+        enlace.download = `texto_humanizado_${i18n.getIdiomaActual()}.txt`;
+        enlace.click();
+    };
+
+    return {
+        humanizar,
+        copiarTexto,
+        descargarComoTxt
+    };
+})();
+
+// === MÓDULO DE INTERFAZ DE USUARIO Y CONFIGURACIÓN ===
+// Maneja la interacción con la UI y la carga de preferencias de usuario.
+const UI = (() => {
+    // Alterna entre modo claro y oscuro.
+    const toggleModoOscuro = () => {
+        document.body.classList.toggle("dark-mode");
+        localStorage.setItem("modoOscuro", document.body.classList.contains("dark-mode"));
+    };
+
+    // Guarda el texto original en localStorage.
+    const guardarTextoOriginal = () => {
+        const texto = Utils.obtenerElemento("textoOriginal").value;
+        localStorage.setItem("ultimoTexto", texto);
+    };
+
+    // Inicializa la aplicación: carga preferencias, asigna listeners, etc.
+    const inicializar = () => {
+        // Añadir contenedor de notificaciones dinámicamente si no existe
+        if (!Utils.obtenerElemento('notificacionContainer')) {
+            const container = document.createElement('div');
+            container.id = 'notificacionContainer';
+            document.body.appendChild(container);
+        }
+
+        // Cargar último texto guardado
+        const ultimoTexto = localStorage.getItem("ultimoTexto");
+        if (ultimoTexto) {
+            Utils.obtenerElemento("textoOriginal").value = ultimoTexto;
+        }
+
+        // Aplicar modo oscuro si estaba activado
+        if (localStorage.getItem("modoOscuro") === "true") {
+            document.body.classList.add("dark-mode");
+        }
+
+        // Cargar el estado de los intentos
+        LimiteIntentos.cargarEstadoIntentos();
+
+        // Listener para el selector de idioma
+        const selectorIdioma = Utils.obtenerElemento("selectorIdioma");
+        if (selectorIdioma) {
+            selectorIdioma.value = i18n.getIdiomaActual();
+            selectorIdioma.addEventListener("change", (event) => {
+                i18n.setIdioma(event.target.value);
+                i18n.actualizarInterfaz();
             });
-    } else {
-        mostrarMensajeModal(textos.alertaHumanizarVacio, true, 'mainMessage');
-    }
-    setTimeout(() => { mostrarMensajeModal('', false, 'mainMessage'); }, 3000);
-};
+        }
 
-const descargarComoTxt = () => {
-    const salida = obtenerElemento("textoHumanizado");
-    const textos = contenidoIdioma[idiomaActual];
-    if (salida && salida.textContent.trim()) {
-        const nombreArchivo = "texto_humanizado.txt";
-        const blob = new Blob([salida.textContent], { type: "text/plain;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = nombreArchivo;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        mostrarMensajeModal(`"${nombreArchivo}" ${textos.alertaCopiar.replace('copiado', 'descargado')}`, false, 'mainMessage'); // Reutilizar mensaje
-    } else {
-        mostrarMensajeModal(textos.alertaHumanizarVacio, true, 'mainMessage');
-    }
-    setTimeout(() => { mostrarMensajeModal('', false, 'mainMessage'); }, 3000);
-};
+        // Actualizar la interfaz con el idioma inicial o preferido
+        i18n.actualizarInterfaz();
 
-// === CARGA INICIAL DEL DOM ===
-document.addEventListener('DOMContentLoaded', () => {
-    // Inicializar referencias a elementos del DOM
-    loginModal = obtenerElemento('loginModal');
-    cerrarModalButton = obtenerElemento('cerrarModal'); // Obtener referencia aquí
-    modalTitulo = obtenerElemento('modalTitulo');
-    authForm = obtenerElemento('authForm');
-    labelUsername = obtenerElemento('labelUsername');
-    usernameInput = obtenerElemento('username');
-    labelPassword = obtenerElemento('labelPassword');
-    passwordInput = obtenerElemento('password');
-    submitAuthButton = obtenerElemento('submitAuth');
-    linkRegistro = obtenerElemento('linkRegistro');
-    modalMessage = obtenerElemento('modalMessage');
-    upgradePlanModal = obtenerElemento('upgradePlanModal');
-    closeModalUpgradeBtn = obtenerElemento('closeModalUpgrade');
-    upgradePlanOptions = obtenerElemento('upgradePlanOptions');
-    upgradePlanMessage = obtenerElemento('upgradePlanMessage');
-    upgradePlanButton = obtenerElemento('upgradePlanButton');
+        // Asignar listeners a los botones y textarea
+        Utils.obtenerElemento('botonHumanizar')?.addEventListener('click', Humanizador.humanizar);
+        Utils.obtenerElemento('botonCopiar')?.addEventListener('click', Humanizador.copiarTexto);
+        Utils.obtenerElemento('botonDescargar')?.addEventListener('click', Humanizador.descargarComoTxt);
+        Utils.obtenerElemento('botonModoOscuro')?.addEventListener('click', toggleModoOscuro);
+        Utils.obtenerElemento('textoOriginal')?.addEventListener('input', guardarTextoOriginal);
 
+        // Listeners para la funcionalidad de Cuentas
+        Utils.obtenerElemento('botonLogin').addEventListener('click', Auth.abrirModal);
+        Utils.obtenerElemento('cerrarModal').addEventListener('click', Auth.cerrarModal);
+        Utils.obtenerElemento('authForm').addEventListener('submit', Auth.manejarAutenticacion);
+        Utils.obtenerElemento('linkRegistro').addEventListener('click', Auth.alternarModoAuth);
 
-    cargarModoOscuro();
-
-    // Asignar listeners al selector de idioma
-    const idiomaSelect = obtenerElemento('idiomaSelect');
-    if (idiomaSelect) {
-        idiomaSelect.value = idiomaActual; // Establecer la selección inicial
-        idiomaSelect.addEventListener('change', (event) => {
-            idiomaActual = event.target.value;
-            localStorage.setItem("idiomaPreferido", idiomaActual);
-            actualizarInterfaz();
+        // Cerrar modal si se hace clic fuera de él
+        window.addEventListener('click', (event) => {
+            if (event.target === Utils.obtenerElemento('loginModal')) {
+                Auth.cerrarModal();
+            }
         });
-    }
+    };
 
-    // Cargar información del usuario desde localStorage
-    jwtToken = localStorage.getItem('jwt_token');
-    const storedUserData = localStorage.getItem('user_data');
+    return {
+        inicializar
+    };
+})();
 
-    if (jwtToken && storedUserData) {
-        try {
-            const parsedUser = JSON.parse(storedUserData);
-            usuarioLogueado = parsedUser;
-            userPlanInfo = {
-                plan_type: parsedUser.plan_type,
-                daily_attempts: parsedUser.daily_attempts,
-                word_count_today: parsedUser.word_count_today
-            };
-            // Verificar el token con el backend para asegurarse de que es válido
-            fetch(`${API_BASE_URL}/check-token`, {
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${jwtToken}` }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.user) {
-                    usuarioLogueado = data.user;
-                    userPlanInfo = {
-                        plan_type: data.user.plan_type,
-                        daily_attempts: data.user.daily_attempts,
-                        word_count_today: data.user.word_count_today
-                    };
-                    localStorage.setItem('user_data', JSON.stringify(data.user)); // Actualizar por si hay cambios en el backend
-                    actualizarInterfaz(); // Actualizar la interfaz con los datos del usuario
-                    console.log('Token JWT válido y usuario cargado.');
-                } else {
-                    console.warn('Token JWT inválido o expirado. Sesión cerrada.');
-                    cerrarSesion(); // Limpiar datos si el token no es válido
-                }
-            })
-            .catch(error => {
-                console.error('Error al verificar el token:', error);
-                cerrarSesion(); // Limpiar datos en caso de error de red o servidor
-            });
-        } catch (e) {
-            console.error("Error al parsear datos de usuario de localStorage:", e);
-            cerrarSesion(); // Limpiar datos si hay un error en el formato
-        }
-    } else {
-        actualizarInterfaz(); // Actualizar la interfaz para un usuario no logueado
-    }
-
-
-    // Asignar listeners a los botones principales.
-    obtenerElemento('botonHumanizar')?.addEventListener('click', humanizar);
-    obtenerElemento('botonCopiar')?.addEventListener('click', copiarTexto);
-    obtenerElemento('botonDescargar')?.addEventListener('click', descargarComoTxt);
-    obtenerElemento('botonModoOscuro')?.addEventListener('click', toggleModoOscuro);
-    obtenerElemento('textoOriginal')?.addEventListener('input', () => {
-        // La lógica de guardar texto y actualizar contadores debe estar aquí
-        const textoOriginal = obtenerElemento('textoOriginal').value;
-        localStorage.setItem('textoOriginal', textoOriginal);
-        obtenerElemento('originalStats').textContent = `${contenidoIdioma[idiomaActual].originalStats} ${contarPalabras(textoOriginal)}`;
-    });
-
-    // Cargar texto guardado previamente
-    const textoGuardado = localStorage.getItem('textoOriginal');
-    if (textoGuardado) {
-        obtenerElemento('textoOriginal').value = textoGuardado;
-        obtenerElemento('originalStats').textContent = `${contenidoIdioma[idiomaActual].originalStats} ${contarPalabras(textoGuardado)}`;
-    }
-
-
-    // --- Listeners para la funcionalidad de Cuentas ---
-    // El listener para 'botonLogin' se asigna/re-asigna en actualizarBotonLoginUI()
-    if (cerrarModalButton) {
-        cerrarModalButton.addEventListener('click', cerrarModal);
-        console.log('Listener para #cerrarModal configurado.'); // Debugging: Confirmar la asignación
-    } else {
-        console.error('ERROR: El elemento con ID "cerrarModal" no fue encontrado en el DOM. El botón de cerrar no funcionará.'); // Debugging: Alertar si el elemento no existe
-    }
-
-    if (authForm) {
-        authForm.addEventListener('submit', manejarAutenticacion);
-    }
-    if (linkRegistro) {
-        linkRegistro.addEventListener('click', alternarModoAuth);
-    }
-
-    // Cerrar modal si se hace clic fuera de él
-    window.addEventListener('click', (event) => {
-        if (loginModal && (loginModal.style.display === 'flex' || loginModal.style.display === 'block') && event.target === loginModal) {
-            cerrarModal();
-        }
-        if (upgradePlanModal && (upgradePlanModal.style.display === 'flex' || upgradePlanModal.style.display === 'block') && event.target === upgradePlanModal) {
-            cerrarModalMejorarPlan();
-        }
-    });
-
-    // Listeners para el modal de mejora de plan
-    if (closeModalUpgradeBtn) {
-        closeModalUpgradeBtn.addEventListener('click', cerrarModalMejorarPlan);
-    }
-    if (upgradePlanButton) {
-        upgradePlanButton.addEventListener('click', manejarMejorarPlan);
-    }
-    const mejorarPlanLink = obtenerElemento('mejorarPlanLink');
-    if (mejorarPlanLink) {
-        mejorarPlanLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            abrirModalMejorarPlan(contenidoIdioma[idiomaActual].textoMejorarPlan, 'manual_open');
+// === MÓDULO DE PLANES ===
+const Planes = (() => {
+    const abrirModal = () => {
+        Utils.obtenerElemento('planesModal').style.display = 'block';
+    };
+    const cerrarModal = () => {
+        Utils.obtenerElemento('planesModal').style.display = 'none';
+    };
+    const inicializar = () => {
+        Utils.obtenerElemento('botonPlanes').addEventListener('click', abrirModal);
+        Utils.obtenerElemento('cerrarPlanesModal').addEventListener('click', cerrarModal);
+        // Cerrar modal si se hace clic fuera de él
+        window.addEventListener('click', (event) => {
+            if (event.target === Utils.obtenerElemento('planesModal')) {
+                cerrarModal();
+            }
         });
-    }
+    };
+    return { inicializar };
+})();
 
-    // Mensaje para la interfaz principal (no el modal de login)
-    const mainMessageElement = document.createElement('div');
-    mainMessageElement.id = 'mainMessage';
-    mainMessageElement.className = 'modal-message'; // Reutiliza algunos estilos, ajusta en CSS
-    mainMessageElement.style.display = 'none';
-    mainMessageElement.style.position = 'fixed';
-    mainMessageElement.style.bottom = '20px';
-    mainMessageElement.style.left = '50%';
-    mainMessageElement.style.transform = 'translateX(-50%)';
-    mainMessageElement.style.zIndex = '1000';
-    mainMessageElement.style.padding = '10px 20px';
-    mainMessageElement.style.borderRadius = '5px';
-    mainMessageElement.style.backgroundColor = 'var(--fondo-area)'; // Ajusta color
-    mainMessageElement.style.color = 'var(--texto-principal)';
-    mainMessageElement.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
-    document.body.appendChild(mainMessageElement);
+// === INICIO DE LA APLICACIÓN ===
+document.addEventListener("DOMContentLoaded", () => {
+    UI.inicializar();
+    Planes.inicializar();
 });
